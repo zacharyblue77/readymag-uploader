@@ -1,60 +1,117 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Upload Videos</title>
-    <script src="https://widget.cloudinary.com/v2.0/global/all.js"></script>
-    <style>
-      :root { color-scheme: light dark; }
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-             padding: 24px; max-width: 720px; margin: auto; }
-      .drop { border: 2px dashed #999; border-radius: 12px; padding: 28px;
-              text-align: center; margin: 16px 0; }
-      button { padding: 12px 16px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
-      #log p { margin: 6px 0; }
-    </style>
-  </head>
-  <body>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Upload Videos</title>
+  <script src="https://widget.cloudinary.com/v2.0/global/all.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:40px; background:#f6f7f8; }
+    .wrap { width:min(880px,100%); margin:auto; background:#fff; border:1px solid #e7e7e7;
+            border-radius:14px; padding:24px 24px 28px; box-shadow:0 6px 24px rgba(0,0,0,.06);}
+    h1 { margin:0 0 6px; font-size:28px; }
+    .sub { margin:0 0 18px; color:#666; }
+    .row { display:flex; gap:12px; align-items:center; margin:10px 0 18px; flex-wrap:wrap; }
+    button { padding:10px 14px; border:1px solid #d0d0d0; border-radius:10px; background:#fff; cursor:pointer; }
+    #log p { margin:6px 0; }
+    .list { margin-top:14px; display:grid; gap:10px; }
+    .item { padding:10px; border:1px solid #eee; border-radius:10px; background:#fafafa; display:flex; gap:10px; align-items:center;}
+    .thumb { width:120px; height:68px; object-fit:cover; border-radius:8px; background:#ddd; }
+    .grow { flex:1; word-break:break-all; }
+    .small { color:#666; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
     <h1>Upload Videos</h1>
-    <p>Drag & drop or click. <strong>Max 6 MB</strong>. Accepted: MP4 / MOV / WEBM.</p>
+    <p class="sub">Drag & drop in the popup or click the button. <strong>Max 6&nbsp;MB</strong>. Accepted: MP4 / MOV / WEBM.</p>
 
-    <div class="drop">
+    <div class="row">
       <button id="uploadBtn">Select videos</button>
+      <span class="small">Uploads go to Cloudinary → folder <code>readymag_videos</code> with tag <code>portfolio-vids</code>.</span>
     </div>
 
-    <div id="log"></div>
+    <div id="log" class="small"></div>
+    <div id="list" class="list"></div>
+  </div>
 
-    <script>
-      // Your Cloudinary details
-      const CLOUD_NAME = 'dcwn892ng';
-      const UPLOAD_PRESET = 'rm_unsigned_video';
-      const MAX_SIZE = 6 * 1024 * 1024; // 6 MB
+  <script>
+    // ---- CONFIG (yours) ----
+    const CLOUD_NAME    = 'dcwn89zng';
+    const UPLOAD_PRESET = 'rm_unsigned_video';
+    const FOLDER        = 'readymag_videos';
+    const TAG           = 'portfolio-vids';
+    const MAX_SIZE      = 6 * 1024 * 1024; // 6 MB
 
-      const widget = cloudinary.createUploadWidget({
-        cloudName: CLOUD_NAME,
-        uploadPreset: UPLOAD_PRESET,
-        sources: ['local','url','google_drive','dropbox'],
-        multiple: true,
-        maxFileSize: MAX_SIZE,                 // enforce 6 MB cap
-        resourceType: 'video',
-        clientAllowedFormats: ['mp4','mov','webm'],
-        folder: 'readymag_videos',             // optional, tidy
-        tags: ['portfolio-vids']               // used by Readymag to list videos
-      }, (error, result) => {
-        if (error) { add('Error: ' + error.message); return; }
-        if (result && result.event === 'success') {
-          const f = result.info;
-          add(`Uploaded: ${f.original_filename}.${f.format} (${(f.bytes/1024/1024).toFixed(2)} MB)`);
-        }
-      });
-
-      document.getElementById('uploadBtn').addEventListener('click', () => widget.open());
-
-      function add(msg){
-        const p=document.createElement('p'); p.textContent = msg;
-        document.getElementById('log').prepend(p);
+    // Create the Cloudinary Upload Widget
+    const widget = cloudinary.createUploadWidget({
+      cloudName: CLOUD_NAME,
+      uploadPreset: UPLOAD_PRESET,          // UNSIGNED preset
+      sources: ['local','url','google_drive','dropbox'],
+      multiple: true,
+      maxFileSize: MAX_SIZE,
+      resourceType: 'video',
+      clientAllowedFormats: ['mp4','mov','webm'],
+      folder: FOLDER,
+      tags: [TAG]
+    }, (error, result) => {
+      if (error) {
+        addLog('Error: ' + (error.message || error));
+        return;
       }
-    </script>
-  </body>
+      if (result && result.event === 'success') {
+        const f = result.info;
+        addLog(`Uploaded: ${f.original_filename}.${f.format} (${(f.bytes/1024/1024).toFixed(2)} MB)`);
+        addItem(f);
+      }
+    });
+
+    document.getElementById('uploadBtn').addEventListener('click', () => widget.open());
+
+    function addLog(msg){
+      const p = document.createElement('p');
+      p.textContent = msg;
+      document.getElementById('log').prepend(p);
+    }
+
+    function addItem(info){
+      const wrap = document.createElement('div');
+      wrap.className = 'item';
+
+      const poster = `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/${info.public_id}.jpg`;
+
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.src = poster;
+      img.alt = 'thumbnail';
+
+      const link = document.createElement('a');
+      link.href = info.secure_url;
+      link.textContent = info.secure_url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+
+      const copy = document.createElement('button');
+      copy.textContent = 'Copy URL';
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(info.secure_url);
+          copy.textContent = 'Copied!';
+          setTimeout(() => (copy.textContent = 'Copy URL'), 1200);
+        } catch (e) {}
+      };
+
+      const meta = document.createElement('div');
+      meta.className = 'grow';
+      meta.appendChild(link);
+
+      wrap.appendChild(img);
+      wrap.appendChild(meta);
+      wrap.appendChild(copy);
+      document.getElementById('list').prepend(wrap);
+    }
+  </script>
+</body>
 </html>
+
