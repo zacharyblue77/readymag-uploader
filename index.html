@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upload Videos</title>
+    <script src="https://widget.cloudinary.com/v2.0/global/all.js"></script>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+             padding: 24px; max-width: 720px; margin: auto; }
+      .drop { border: 2px dashed #999; border-radius: 12px; padding: 28px;
+              text-align: center; margin: 16px 0; }
+      button { padding: 12px 16px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+      #log p { margin: 6px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Upload Videos</h1>
+    <p>Drag & drop or click. <strong>Max 6 MB</strong>. Accepted: MP4 / MOV / WEBM.</p>
+
+    <div class="drop">
+      <button id="uploadBtn">Select videos</button>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+      // Your Cloudinary details
+      const CLOUD_NAME = 'dcwn892ng';
+      const UPLOAD_PRESET = 'rm_unsigned_video';
+      const MAX_SIZE = 6 * 1024 * 1024; // 6 MB
+
+      const widget = cloudinary.createUploadWidget({
+        cloudName: CLOUD_NAME,
+        uploadPreset: UPLOAD_PRESET,
+        sources: ['local','url','google_drive','dropbox'],
+        multiple: true,
+        maxFileSize: MAX_SIZE,                 // enforce 6 MB cap
+        resourceType: 'video',
+        clientAllowedFormats: ['mp4','mov','webm'],
+        folder: 'readymag_videos',             // optional, tidy
+        tags: ['portfolio-vids']               // used by Readymag to list videos
+      }, (error, result) => {
+        if (error) { add('Error: ' + error.message); return; }
+        if (result && result.event === 'success') {
+          const f = result.info;
+          add(`Uploaded: ${f.original_filename}.${f.format} (${(f.bytes/1024/1024).toFixed(2)} MB)`);
+        }
+      });
+
+      document.getElementById('uploadBtn').addEventListener('click', () => widget.open());
+
+      function add(msg){
+        const p=document.createElement('p'); p.textContent = msg;
+        document.getElementById('log').prepend(p);
+      }
+    </script>
+  </body>
+</html>
