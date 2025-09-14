@@ -17,7 +17,6 @@ export default async function handler(req, res) {
 
   const auth = 'Basic ' + Buffer.from(`${KEY}:${SECRET}`).toString('base64');
 
-  // Admin API delete helper (DELETE /resources/{type}/upload with public_ids[])
   async function adminDelete(resourceType) {
     const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/resources/${resourceType}/upload`;
     const body = new URLSearchParams();
@@ -34,7 +33,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Try as video first, then image (covers GIFs saved as images)
     let r = await adminDelete('video');
     if (!(r.ok || r?.json?.deleted?.[public_id])) {
       r = await adminDelete('image');
