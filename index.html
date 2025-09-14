@@ -1,50 +1,248 @@
-<script>
-  const cloudName = "dcwn89zng"; 
-  const preset = "rm_unsigned_video"; 
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Upload Videos</title>
+  <script src="https://widget.cloudinary.com/v2.0/global/all.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f6f7f8}
+    .wrap{max-width:980px;margin:0 auto;padding:28px}
+    .card{background:#fff;border:1px solid #e7e7e7;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.06);padding:20px;margin:0 0 18px}
+    h1{margin:0 0 6px;font-size:28px}
+    .sub{margin:0 0 14px;color:#555}
+    button{padding:10px 14px;border:1px solid #d0d0d0;border-radius:10px;background:#fff;cursor:pointer}
+    .muted{color:#555;font-size:12px}
 
-  async function fetchVideos() {
-    const response = await fetch(`https://res.cloudinary.com/${cloudName}/video/list/portfolio-vids.json?t=${Date.now()}`);
-    const data = await response.json();
-    const gallery = document.getElementById("gallery");
-    gallery.innerHTML = "";
-    data.resources.forEach(file => {
-      const card = document.createElement("div");
-      card.className = "card";
+    /* Upload queue */
+    .queue{display:grid;gap:8px;margin-top:12px}
+    .row{display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid #eee;border-radius:10px;background:#fafafa}
+    .name{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+    .pill{font-size:12px;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #dde;color:#334}
+    .ok{background:#e9f9ee;border-color:#cdeccd;color:#115d2a}
+    .err{background:#fdecec;border-color:#f5c2c2;color:#8a1f1f}
+    .bar{position:relative;flex:0 0 160px;height:6px;border-radius:999px;background:#e6e6e6;overflow:hidden}
+    .bar > i{position:absolute;inset:0;display:block;background:linear-gradient(90deg,#bdbdbd,#d9d9d9,#bdbdbd);animation:slide 1.1s linear infinite}
+    @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
 
-      // Video or GIF preview
-      const video = document.createElement("video");
-      video.src = `https://res.cloudinary.com/${cloudName}/video/upload/${file.public_id}.${file.format}`;
-      video.controls = true;
-      card.appendChild(video);
+    /* Gallery */
+    .row-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+    .card-v{background:#fff;border:1px solid #eee;border-radius:12px;padding:10px}
+    .card-v video,.card-v img{width:100%;border-radius:8px;display:block}
+    .meta{font:12px/1.3;color:#555;margin-top:6px;word-break:break-all;display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .meta .left{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .btns{display:flex;gap:6px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Uploader -->
+    <div class="card">
+      <h1>Upload Videos</h1>
+      <p class="sub">Drag & drop in the popup or click the button. <strong>Max 6&nbsp;MB</strong>. Accepted: MP4 / MOV / WEBM / GIF.</p>
+      <div class="row-head">
+        <button id="uploadBtn">Select videos</button>
+        <span class="muted">Uploads go to folder <code>readymag_videos</code> with tag <code>portfolio-vids</code>.</span>
+      </div>
 
-      // Filename
-      const name = document.createElement("div");
-      name.textContent = file.public_id.split("/").pop();
-      card.appendChild(name);
+      <!-- Live queue / progress -->
+      <div id="queue" class="queue"></div>
+      <div id="note" class="muted" style="margin-top:8px;"></div>
+    </div>
 
-      // Delete button
-      const delBtn = document.createElement("button");
-      delBtn.textContent = "Delete";
-      delBtn.onclick = async () => {
-        if (confirm("Delete this file?")) {
-          const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/delete_by_token`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: file.delete_token })
-          });
-          if (res.ok) {
-            alert("Deleted!");
-            fetchVideos(); // refresh list
-          } else {
-            alert("Error deleting file");
-          }
-        }
+    <!-- Library -->
+    <div class="card">
+      <div class="row-head">
+        <h2 style="margin:0">Current videos</h2>
+        <button id="refreshBtn" title="Refresh list">Refresh</button>
+      </div>
+      <div id="gallery" class="grid"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
+
+  <script>
+    /* ==== CONFIG ==== */
+    const CLOUD_NAME    = 'dcwn89zng';
+    const UPLOAD_PRESET = 'rm_unsigned_video';
+    const FOLDER        = 'readymag_videos';
+    const TAG           = 'portfolio-vids';
+    const MAX_SIZE      = 6 * 1024 * 1024; // 6 MB
+
+    /* ==== Helpers ==== */
+    const $ = sel => document.querySelector(sel);
+    const vUrl   = id => `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/${id}.mp4`;
+    const vJpg   = id => `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/${id}.jpg`;
+    const gifUrl = id => `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/${id}.gif`;
+
+    // store delete tokens from this browser session
+    const TOKEN_KEY = 'rm_delete_tokens';
+    const tokens = JSON.parse(localStorage.getItem(TOKEN_KEY) || '{}');
+    function saveToken(public_id, token){
+      tokens[public_id] = token;
+      localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+    }
+
+    /* ==== Upload queue UI ==== */
+    const q = $('#queue');
+    const note = $('#note');
+
+    function addQueueRow(filename){
+      const row = document.createElement('div'); row.className='row';
+      row.innerHTML = `
+        <span class="name" title="${filename}">${filename}</span>
+        <span class="pill">Uploading…</span>
+        <div class="bar"><i></i></div>
+      `;
+      q.prepend(row);
+      return row;
+    }
+    function addCopyBtn(parent, url){
+      const copy = document.createElement('button');
+      copy.textContent = 'Copy URL';
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(url); copy.textContent='Copied!'; setTimeout(()=>copy.textContent='Copy URL',1200);} catch(e){}
       };
-      card.appendChild(delBtn);
+      parent.appendChild(copy);
+    }
+    function markSuccess(row, url){
+      row.querySelector('.pill').textContent='Uploaded';
+      row.querySelector('.pill').className='pill ok';
+      const bar = row.querySelector('.bar'); if (bar) bar.remove();
+      addCopyBtn(row, url);
+    }
+    function markError(row, msg){
+      row.querySelector('.pill').textContent='Error';
+      row.querySelector('.pill').className='pill err';
+      const bar = row.querySelector('.bar'); if (bar) bar.remove();
+      const err = document.createElement('span'); err.className='muted'; err.style.marginLeft='8px'; err.textContent = msg || 'Upload failed';
+      row.appendChild(err);
+    }
 
-      gallery.appendChild(card);
+    /* ==== Cloudinary Upload Widget ==== */
+    const widget = cloudinary.createUploadWidget({
+      cloudName: CLOUD_NAME,
+      uploadPreset: UPLOAD_PRESET,       // unsigned
+      sources: ['local','url','google_drive','dropbox'],
+      multiple: true,
+      maxFileSize: MAX_SIZE,
+      resourceType: 'auto',              // allow gif + video
+      clientAllowedFormats: ['mp4','mov','webm','gif'],
+      folder: FOLDER,
+      tags: [TAG]
+    }, (error, result) => {
+      if (error) { note.textContent = 'Error: ' + (error.message || error); return; }
+      if (!result) return;
+
+      if (result.event === 'queues-start') note.textContent = 'Uploading…';
+      if (result.event === 'queues-end')   note.textContent = 'All uploads finished.';
+
+      if (result.event === 'upload-added') {
+        const f = result.info?.files?.[0]?.file || result.info;
+        const name = (f?.name || f?.original_filename || 'file').toString();
+        result.info.__row = addQueueRow(name);
+      }
+
+      if (result.event === 'success') {
+        const info = result.info; // has public_id, secure_url, delete_token (if enabled)
+        const row = info.__row || q.firstElementChild;
+        markSuccess(row, info.secure_url);
+
+        if (info.delete_token && info.public_id) {
+          saveToken(info.public_id, info.delete_token);
+          // add quick delete on the queue row
+          const del = document.createElement('button');
+          del.textContent = 'Delete';
+          del.style.marginLeft = '8px';
+          del.onclick = () => deleteByToken(info.public_id, info.delete_token, () => { row.remove(); renderGallery(); });
+          row.appendChild(del);
+        }
+
+        setTimeout(renderGallery, 800);
+      }
     });
-  }
 
-  window.onload = fetchVideos;
-</script>
+    $('#uploadBtn').addEventListener('click', () => widget.open());
+
+    async function deleteByToken(public_id, token, onDone){
+      try{
+        const fd = new FormData();
+        fd.append('token', token);
+        const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/delete_by_token`, { method:'POST', body: fd });
+        if (resp.ok) {
+          delete tokens[public_id];
+          localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+          if (onDone) onDone();
+        } else {
+          alert('Delete failed.');
+        }
+      }catch(e){ alert('Delete failed.'); }
+    }
+
+    /* ==== Library (Current media) ==== */
+    async function fetchListBoth() {
+      const urls = [
+        `https://res.cloudinary.com/${CLOUD_NAME}/video/list/${TAG}.json`,
+        `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${TAG}.json`,
+      ];
+      const results = await Promise.allSettled(urls.map(u => fetch(u + `?t=${Date.now()}`, { cache:'no-store' })));
+      const jsons = await Promise.all(results.map(async r => (r.status==='fulfilled' && r.value.ok) ? r.value.json() : {resources:[]}));
+      const merged = [...(jsons[0].resources||[]), ...(jsons[1].resources||[])]
+        .sort((a,b)=>(b.version||0)-(a.version||0));
+      return merged;
+    }
+
+    async function renderGallery(){
+      const root = $('#gallery');
+      try{
+        const items = await fetchListBoth();
+        if (!items.length){ root.innerHTML = '<p class="muted">No media yet.</p>'; return; }
+        root.innerHTML = '';
+        items.forEach(it=>{
+          const isGif = (it.format||'').toLowerCase()==='gif';
+          const box = document.createElement('div'); box.className='card-v';
+
+          if (isGif) {
+            box.innerHTML = `<img src="${gifUrl(it.public_id)}" alt="gif"/>`;
+          } else {
+            box.innerHTML = `
+              <video controls playsinline preload="metadata" poster="${vJpg(it.public_id)}">
+                <source src="${vUrl(it.public_id)}" type="video/mp4">
+              </video>`;
+          }
+
+          const meta = document.createElement('div'); meta.className='meta';
+          const sizeMB = isFinite(it.bytes) ? (it.bytes/1024/1024).toFixed(2)+' MB' : '';
+          meta.innerHTML = `<span class="left">${it.public_id.split('/').pop()}.${it.format} ${sizeMB ? '— '+sizeMB : ''}</span>`;
+
+          const btns = document.createElement('div'); btns.className='btns';
+          const copy = document.createElement('button');
+          copy.textContent = 'Copy URL';
+          copy.onclick = () => navigator.clipboard.writeText(isGif ? gifUrl(it.public_id) : vUrl(it.public_id));
+          btns.appendChild(copy);
+
+          // show Delete if we have a token from this browser session
+          if (tokens[it.public_id]) {
+            const del = document.createElement('button');
+            del.textContent = 'Delete';
+            del.onclick = () => deleteByToken(it.public_id, tokens[it.public_id], () => { box.remove(); });
+            btns.appendChild(del);
+          }
+
+          meta.appendChild(btns);
+          box.appendChild(meta);
+          root.appendChild(box);
+        });
+      }catch(e){
+        root.innerHTML = '<p class="muted">Unable to load media.</p>';
+        console.error(e);
+      }
+    }
+
+    $('#refreshBtn').addEventListener('click', renderGallery);
+    renderGallery();
+    setInterval(renderGallery, 60000);
+  </script>
+</body>
+</html>
