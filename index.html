@@ -64,8 +64,8 @@
 
   <script>
     /* ==== CONFIG ==== */
-    const CLOUD_NAME    = 'dcwn89zng';
-    const UPLOAD_PRESET = 'rm_unsigned_video';
+    const CLOUD_NAME    = 'dcwn89zng';          // your Cloudinary cloud name
+    const UPLOAD_PRESET = 'rm_unsigned_video';  // your unsigned preset
     const FOLDER        = 'readymag_videos';
     const TAG           = 'portfolio-vids';
     const MAX_SIZE      = 6 * 1024 * 1024; // 6 MB
@@ -82,6 +82,10 @@
     function saveToken(public_id, token){
       tokens[public_id] = token;
       localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+    }
+
+    function humanMB(bytes) {
+      return (isFinite(bytes) && bytes > 0) ? (bytes/1024/1024).toFixed(2) + ' MB' : '';
     }
 
     /* ==== Upload queue UI ==== */
@@ -106,11 +110,20 @@
       };
       parent.appendChild(copy);
     }
-    function markSuccess(row, url){
+    function markSuccess(row, url, onDeleteClick){
       row.querySelector('.pill').textContent='Uploaded';
       row.querySelector('.pill').className='pill ok';
       const bar = row.querySelector('.bar'); if (bar) bar.remove();
       addCopyBtn(row, url);
+
+      // Add Delete on the queue row if available
+      if (onDeleteClick) {
+        const del = document.createElement('button');
+        del.textContent = 'Delete';
+        del.style.marginLeft = '8px';
+        del.onclick = onDeleteClick;
+        row.appendChild(del);
+      }
     }
     function markError(row, msg){
       row.querySelector('.pill').textContent='Error';
@@ -118,6 +131,28 @@
       const bar = row.querySelector('.bar'); if (bar) bar.remove();
       const err = document.createElement('span'); err.className='muted'; err.style.marginLeft='8px'; err.textContent = msg || 'Upload failed';
       row.appendChild(err);
+    }
+
+    /* ==== Delete helpers ==== */
+    async function deleteByToken(public_id, token) {
+      const fd = new FormData();
+      fd.append('token', token);
+      const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/delete_by_token`, { method:'POST', body: fd });
+      if (resp.ok) {
+        delete tokens[public_id];
+        localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+        return true;
+      }
+      return false;
+    }
+    async function deleteByAdmin(public_id) {
+      // requires /api/delete on Vercel using API Key/Secret
+      const resp = await fetch('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ public_id })
+      });
+      return resp.ok;
     }
 
     /* ==== Cloudinary Upload Widget ==== */
@@ -147,38 +182,23 @@
       if (result.event === 'success') {
         const info = result.info; // has public_id, secure_url, delete_token (if enabled)
         const row = info.__row || q.firstElementChild;
-        markSuccess(row, info.secure_url);
+
+        const onDeleteClick = info.delete_token ? async () => {
+          if (!confirm('Delete this file from Cloudinary?')) return;
+          const ok = await deleteByToken(info.public_id, info.delete_token);
+          if (ok) { row.remove(); renderGallery(); } else { alert('Delete failed.'); }
+        } : null;
+
+        markSuccess(row, info.secure_url, onDeleteClick);
 
         if (info.delete_token && info.public_id) {
           saveToken(info.public_id, info.delete_token);
-          // add quick delete on the queue row
-          const del = document.createElement('button');
-          del.textContent = 'Delete';
-          del.style.marginLeft = '8px';
-          del.onclick = () => deleteByToken(info.public_id, info.delete_token, () => { row.remove(); renderGallery(); });
-          row.appendChild(del);
         }
-
         setTimeout(renderGallery, 800);
       }
     });
 
     $('#uploadBtn').addEventListener('click', () => widget.open());
-
-    async function deleteByToken(public_id, token, onDone){
-      try{
-        const fd = new FormData();
-        fd.append('token', token);
-        const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/delete_by_token`, { method:'POST', body: fd });
-        if (resp.ok) {
-          delete tokens[public_id];
-          localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
-          if (onDone) onDone();
-        } else {
-          alert('Delete failed.');
-        }
-      }catch(e){ alert('Delete failed.'); }
-    }
 
     /* ==== Library (Current media) ==== */
     async function fetchListBoth() {
@@ -193,47 +213,63 @@
       return merged;
     }
 
+    function makeCard(it){
+      const isGif = (it.format||'').toLowerCase()==='gif';
+      const box = document.createElement('div'); box.className='card-v';
+
+      if (isGif) {
+        box.innerHTML = `<img src="${gifUrl(it.public_id)}" alt="gif"/>`;
+      } else {
+        box.innerHTML = `
+          <video controls playsinline preload="metadata" poster="${vJpg(it.public_id)}">
+            <source src="${vUrl(it.public_id)}" type="video/mp4">
+          </video>`;
+      }
+
+      const meta = document.createElement('div'); meta.className='meta';
+      meta.innerHTML = `<span class="left">${it.public_id.split('/').pop()}.${it.format} ${humanMB(it.bytes) ? '— '+humanMB(it.bytes) : ''}</span>`;
+
+      const btns = document.createElement('div'); btns.className='btns';
+      const copy = document.createElement('button');
+      copy.textContent = 'Copy URL';
+      copy.onclick = () => navigator.clipboard.writeText(isGif ? gifUrl(it.public_id) : vUrl(it.public_id));
+      btns.appendChild(copy);
+
+      const wantDelete = async () => {
+        if (!confirm('Delete this file from Cloudinary?')) return;
+        let ok = false;
+        if (tokens[it.public_id]) {
+          ok = await deleteByToken(it.public_id, tokens[it.public_id]);
+        } 
+        if (!ok) {
+          // Fall back to admin delete if no token or token fails
+          ok = await deleteByAdmin(it.public_id);
+        }
+        if (ok) {
+          box.remove();
+        } else {
+          alert('Delete failed.');
+        }
+      };
+
+      // Always show delete (will use token if we have it; else admin route)
+      const del = document.createElement('button');
+      del.textContent = 'Delete';
+      del.onclick = wantDelete;
+      btns.appendChild(del);
+
+      meta.appendChild(btns);
+      box.appendChild(meta);
+      return box;
+    }
+
     async function renderGallery(){
       const root = $('#gallery');
       try{
         const items = await fetchListBoth();
         if (!items.length){ root.innerHTML = '<p class="muted">No media yet.</p>'; return; }
         root.innerHTML = '';
-        items.forEach(it=>{
-          const isGif = (it.format||'').toLowerCase()==='gif';
-          const box = document.createElement('div'); box.className='card-v';
-
-          if (isGif) {
-            box.innerHTML = `<img src="${gifUrl(it.public_id)}" alt="gif"/>`;
-          } else {
-            box.innerHTML = `
-              <video controls playsinline preload="metadata" poster="${vJpg(it.public_id)}">
-                <source src="${vUrl(it.public_id)}" type="video/mp4">
-              </video>`;
-          }
-
-          const meta = document.createElement('div'); meta.className='meta';
-          const sizeMB = isFinite(it.bytes) ? (it.bytes/1024/1024).toFixed(2)+' MB' : '';
-          meta.innerHTML = `<span class="left">${it.public_id.split('/').pop()}.${it.format} ${sizeMB ? '— '+sizeMB : ''}</span>`;
-
-          const btns = document.createElement('div'); btns.className='btns';
-          const copy = document.createElement('button');
-          copy.textContent = 'Copy URL';
-          copy.onclick = () => navigator.clipboard.writeText(isGif ? gifUrl(it.public_id) : vUrl(it.public_id));
-          btns.appendChild(copy);
-
-          // show Delete if we have a token from this browser session
-          if (tokens[it.public_id]) {
-            const del = document.createElement('button');
-            del.textContent = 'Delete';
-            del.onclick = () => deleteByToken(it.public_id, tokens[it.public_id], () => { box.remove(); });
-            btns.appendChild(del);
-          }
-
-          meta.appendChild(btns);
-          box.appendChild(meta);
-          root.appendChild(box);
-        });
+        items.forEach(it => root.appendChild(makeCard(it)));
       }catch(e){
         root.innerHTML = '<p class="muted">Unable to load media.</p>';
         console.error(e);
