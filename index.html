@@ -12,7 +12,7 @@
     .card{background:#fff;border:1px solid #e7e7e7;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.06);padding:20px;margin:0 0 18px}
     h1{margin:0 0 6px;font-size:28px}
     .sub{margin:0 0 14px;color:#555}
-    button{padding:10px 14px;border:1px solid #d0d0d0;border-radius:10px;background:#fff;cursor:pointer}
+    button{padding:10px 14px;border:1px solid #d0d0d0;border-radius:10px;background:#fff;cursor:pointer;min-width:96px}
     .muted{color:#555;font-size:12px}
 
     /* Upload queue */
@@ -64,8 +64,8 @@
 
   <script>
     /* ==== CONFIG ==== */
-    const CLOUD_NAME    = 'dcwn89zng';          // your Cloudinary cloud name
-    const UPLOAD_PRESET = 'rm_unsigned_video';  // your unsigned preset
+    const CLOUD_NAME    = 'dcwn89zng';
+    const UPLOAD_PRESET = 'rm_unsigned_video';
     const FOLDER        = 'readymag_videos';
     const TAG           = 'portfolio-vids';
     const MAX_SIZE      = 6 * 1024 * 1024; // 6 MB
@@ -85,6 +85,11 @@
     const humanMB = bytes =>
       (isFinite(bytes) && bytes > 0) ? (bytes/1024/1024).toFixed(2) + ' MB' : '';
 
+    function alertJSON(prefix, obj){
+      try { alert(prefix + ' ' + JSON.stringify(obj, null, 2)); }
+      catch { alert(prefix); }
+    }
+
     /* ==== Upload queue UI ==== */
     const q = $('#queue');
     const note = $('#note');
@@ -103,7 +108,10 @@
       const copy = document.createElement('button');
       copy.textContent = 'Copy URL';
       copy.onclick = async () => {
-        try { await navigator.clipboard.writeText(url); copy.textContent='Copied!'; setTimeout(()=>copy.textContent='Copy URL',1200);} catch(e){}
+        try {
+          await navigator.clipboard.writeText(url);
+          const old = copy.textContent; copy.textContent='Copied!'; setTimeout(()=>copy.textContent=old,1200);
+        } catch(e) {}
       };
       parent.appendChild(copy);
     }
@@ -133,12 +141,13 @@
       const fd = new FormData();
       fd.append('token', token);
       const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/delete_by_token`, { method:'POST', body: fd });
-      if (resp.ok) {
+      const json = await resp.json().catch(()=> ({}));
+      if (resp.ok && json?.result === 'ok') {
         delete tokens[public_id];
         localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
-        return true;
+        return { ok: true, json };
       }
-      return false;
+      return { ok: false, json };
     }
     async function deleteByAdmin(public_id) {
       const resp = await fetch('/api/delete', {
@@ -146,7 +155,8 @@
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({ public_id })
       });
-      return resp.ok;
+      const json = await resp.json().catch(()=> ({}));
+      return { ok: resp.ok, json };
     }
 
     /* ==== Cloudinary Upload Widget ==== */
@@ -156,7 +166,7 @@
       sources: ['local','url','google_drive','dropbox'],
       multiple: true,
       maxFileSize: MAX_SIZE,
-      resourceType: 'auto',              // allow gif + video
+      resourceType: 'auto',
       clientAllowedFormats: ['mp4','mov','webm','gif'],
       folder: FOLDER,
       tags: [TAG]
@@ -179,8 +189,9 @@
 
         const onDeleteClick = info.delete_token ? async () => {
           if (!confirm('Delete this file from Cloudinary?')) return;
-          const ok = await deleteByToken(info.public_id, info.delete_token);
-          if (ok) { row.remove(); renderGallery(); } else { alert('Delete failed.'); }
+          const r = await deleteByToken(info.public_id, info.delete_token);
+          if (r.ok) { row.remove(); renderGallery(); }
+          else { alertJSON('Delete failed (token):', r.json); }
         } : null;
 
         markSuccess(row, info.secure_url, onDeleteClick);
@@ -196,6 +207,7 @@
 
     /* ==== Library (Current media) ==== */
     async function fetchListBoth() {
+      // Public listing by tag (no secrets)
       const urls = [
         `https://res.cloudinary.com/${CLOUD_NAME}/video/list/${TAG}.json`,
         `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${TAG}.json`,
@@ -231,17 +243,20 @@
 
       const wantDelete = async () => {
         if (!confirm('Delete this file from Cloudinary?')) return;
-        let ok = false;
+        let r = { ok:false, json:null };
+
+        // prefer token if we have it from this browser
         if (tokens[it.public_id]) {
-          ok = await deleteByToken(it.public_id, tokens[it.public_id]);
+          r = await deleteByToken(it.public_id, tokens[it.public_id]);
         }
-        if (!ok) {
-          ok = await deleteByAdmin(it.public_id);
+        if (!r.ok) {
+          r = await deleteByAdmin(it.public_id);   // admin fallback via /api/delete
         }
-        if (ok) {
+
+        if (r.ok) {
           box.remove();
         } else {
-          alert('Delete failed.');
+          alertJSON('Delete failed (admin):', r.json);
         }
       };
 
