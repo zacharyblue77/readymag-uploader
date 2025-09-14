@@ -12,7 +12,19 @@
     .card{background:#fff;border:1px solid #e7e7e7;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.06);padding:20px;margin:0 0 18px}
     h1{margin:0 0 6px;font-size:28px}
     .sub{margin:0 0 14px;color:#555}
-    button{padding:10px 14px;border:1px solid #d0d0d0;border-radius:10px;background:#fff;cursor:pointer;min-width:96px}
+    button{
+      padding:10px 14px;
+      border:1px solid #d0d0d0;
+      border-radius:10px;
+      background:#fff;
+      color:#111 !important; /* force visible text */
+      cursor:pointer;
+      min-width:96px;
+    }
+    button.btn-danger{
+      background:#fff5f5;
+      border-color:#f3b4b4;
+    }
     .muted{color:#555;font-size:12px}
 
     /* Upload queue */
@@ -90,6 +102,29 @@
       catch { alert(prefix); }
     }
 
+    /* ==== Delete helpers ==== */
+    async function deleteByToken(public_id, token) {
+      const fd = new FormData();
+      fd.append('token', token);
+      const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/delete_by_token`, { method:'POST', body: fd });
+      const json = await resp.json().catch(()=> ({}));
+      if (resp.ok && json?.result === 'ok') {
+        delete tokens[public_id];
+        localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+        return { ok: true, json };
+      }
+      return { ok: false, json };
+    }
+    async function deleteByAdmin(public_id) {
+      const resp = await fetch('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ public_id })
+      });
+      const json = await resp.json().catch(()=> ({}));
+      return { ok: resp.ok, json };
+    }
+
     /* ==== Upload queue UI ==== */
     const q = $('#queue');
     const note = $('#note');
@@ -122,6 +157,7 @@
       addCopyBtn(row, url);
       if (onDeleteClick) {
         const del = document.createElement('button');
+        del.className = 'btn-danger';
         del.textContent = 'Delete';
         del.style.marginLeft = '8px';
         del.onclick = onDeleteClick;
@@ -134,29 +170,6 @@
       const bar = row.querySelector('.bar'); if (bar) bar.remove();
       const err = document.createElement('span'); err.className='muted'; err.style.marginLeft='8px'; err.textContent = msg || 'Upload failed';
       row.appendChild(err);
-    }
-
-    /* ==== Delete helpers ==== */
-    async function deleteByToken(public_id, token) {
-      const fd = new FormData();
-      fd.append('token', token);
-      const resp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/delete_by_token`, { method:'POST', body: fd });
-      const json = await resp.json().catch(()=> ({}));
-      if (resp.ok && json?.result === 'ok') {
-        delete tokens[public_id];
-        localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
-        return { ok: true, json };
-      }
-      return { ok: false, json };
-    }
-    async function deleteByAdmin(public_id) {
-      const resp = await fetch('/api/delete', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ public_id })
-      });
-      const json = await resp.json().catch(()=> ({}));
-      return { ok: resp.ok, json };
     }
 
     /* ==== Cloudinary Upload Widget ==== */
@@ -207,7 +220,6 @@
 
     /* ==== Library (Current media) ==== */
     async function fetchListBoth() {
-      // Public listing by tag (no secrets)
       const urls = [
         `https://res.cloudinary.com/${CLOUD_NAME}/video/list/${TAG}.json`,
         `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${TAG}.json`,
@@ -245,12 +257,11 @@
         if (!confirm('Delete this file from Cloudinary?')) return;
         let r = { ok:false, json:null };
 
-        // prefer token if we have it from this browser
         if (tokens[it.public_id]) {
           r = await deleteByToken(it.public_id, tokens[it.public_id]);
         }
         if (!r.ok) {
-          r = await deleteByAdmin(it.public_id);   // admin fallback via /api/delete
+          r = await deleteByAdmin(it.public_id);
         }
 
         if (r.ok) {
@@ -261,6 +272,7 @@
       };
 
       const del = document.createElement('button');
+      del.className = 'btn-danger';
       del.textContent = 'Delete';
       del.onclick = wantDelete;
       btns.appendChild(del);
